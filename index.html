@@ -5,9 +5,13 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Consultas de Stock & Precios</title>
   <style>
-    :root { --bg:#0f172a; --card:#111827; --accent:#22d3ee; --muted:#94a3b8; --text:#e5e7eb; }
+    :root { --bg:#0f172a; --card:#111827; --accent:#22d3ee; --muted:#94a3b8; --text:#e5e7eb; --ok:#16a34a; --bad:#ef4444; }
     body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,"Helvetica Neue",Arial; background:linear-gradient(180deg,#0b1220,#0f172a 50%); color:var(--text);} 
     .wrap{max-width:880px;margin:0 auto;padding:24px;}
+    .status{display:flex;gap:10px;align-items:center;margin-bottom:10px;padding:10px 12px;border-radius:12px;border:1px solid #1f2937;background:#0b1326}
+    .dot{width:10px;height:10px;border-radius:999px;background:#64748b;box-shadow:0 0 0 4px rgba(100,116,139,.12)}
+    .ok{background:var(--ok)!important}
+    .bad{background:var(--bad)!important}
     .card{background:linear-gradient(180deg,#0b1326,#0c1a2f); border:1px solid #1f2937; border-radius:16px; padding:16px; box-shadow:0 10px 30px rgba(0,0,0,.35);} 
     header{display:flex;align-items:center;gap:12px;margin-bottom:12px}
     .logo{width:36px;height:36px;display:grid;place-items:center;border-radius:10px;background:radial-gradient(circle at 30% 30%,#22d3ee,transparent 60%),radial-gradient(circle at 70% 70%,#a78bfa,transparent 60%);}
@@ -29,8 +33,6 @@
     .row{display:flex;gap:8px;flex-wrap:wrap}
     .pill{font-size:.8rem;border:1px solid #2a3a56;color:#cbd5e1;padding:4px 8px;border-radius:999px}
     .footer{margin-top:8px;color:#64748b;font-size:.8rem}
-    .link{color:#22d3ee}
-    .cta{display:inline-flex;gap:8px;align-items:center;margin-top:10px}
     .ghost{background:#0b1326;border:1px solid #1f2a44;color:#cbd5e1}
     .stack{display:flex;flex-direction:column;gap:6px}
     .modal{position:fixed;inset:0;background:rgba(2,6,23,.65);display:none;align-items:center;justify-content:center;padding:16px}
@@ -41,6 +43,14 @@
 </head>
 <body>
   <div class="wrap">
+    <div class="status" id="status">
+      <span class="dot" id="dot"></span>
+      <div>
+        <div id="statusText">Verificando conexión con el catálogo…</div>
+        <div class="small" id="statusDetail">Probando endpoint…</div>
+      </div>
+    </div>
+
     <div class="card">
       <header>
         <div class="logo">💬</div>
@@ -79,8 +89,8 @@
   </div>
 
 <script>
-// 1) TU URL del Apps Script del catálogo (termina en /exec)
-const CATALOG_URL = ''https://script.google.com/macros/s/AKfycbyAfnoJHlkg1z8fBCDLkOnhvibA3O4BjbEmPwnNJwnDqc2zrt40Z8Ju1P1hAaWg1p1L/exec';
+// 1) URL del Apps Script del catálogo (termina en /exec)
+const CATALOG_URL = 'https://script.google.com/macros/s/AKfycbyAfnoJHlkg1z8fBCDLkOnhvibA3O4BjbEmPwnNJwnDqc2zrt40Z8Ju1P1hAaWg1p1L/exec';
 
 // 2) Utilidades de UI
 const chat = document.getElementById('chat');
@@ -91,6 +101,10 @@ const mNombre = document.getElementById('m_nombre');
 const mTel = document.getElementById('m_tel');
 const mEnviar = document.getElementById('m_enviar');
 const mCerrar = document.getElementById('m_cerrar');
+
+const dot = document.getElementById('dot');
+const statusText = document.getElementById('statusText');
+const statusDetail = document.getElementById('statusDetail');
 
 function now(){ return new Date().toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}); }
 function el(tag, cls, html){ const d=document.createElement(tag); if(cls) d.className=cls; if(html!==undefined) d.innerHTML=html; return d; }
@@ -174,7 +188,7 @@ mEnviar.onclick = async ()=>{
   localStorage.setItem('nombre', nombre);
   localStorage.setItem('tel', tel);
 
-  // Primero intentamos POST normal (puede fallar por CORS según hosting)
+  // Intento POST normal
   try{
     mEnviar.disabled=true; mEnviar.textContent='Enviando…';
     const res = await fetch(`${CATALOG_URL}/request`, {
@@ -187,9 +201,9 @@ mEnviar.onclick = async ()=>{
       pushBot('🙏 Gracias. Registré tu solicitud y te contactaremos con la mejor opción.');
       return;
     }
-  }catch(e){ /* caeremos a JSONP */ }
+  }catch(e){ /* fall back a JSONP */ }
 
-  // Fallback JSONP (requiere que tu Apps Script acepte GET /request con callback)
+  // Fallback JSONP (requiere soporte GET /request en Apps Script)
   try{
     const cb = `cb_req_${Date.now()}`;
     window[cb] = function(resp){
@@ -214,6 +228,40 @@ mEnviar.onclick = async ()=>{
     pushBot('No pude registrar tu solicitud por ahora. Intentaré nuevamente más tarde.');
   }
 };
+
+// 6) Indicador de conectividad al cargar la página
+(function checkConnectivity(){
+  const cb = `cb_ping_${Date.now()}`;
+  const s = document.createElement('script');
+  const url = `${CATALOG_URL}/search?q=__ping__&callback=${cb}`;
+  let timeout = setTimeout(()=>{
+    dot.classList.add('bad');
+    statusText.textContent = '❌ No conectado al catálogo';
+    statusDetail.textContent = 'No se pudo contactar el endpoint (timeout).';
+  }, 6000);
+  window[cb] = function(data){
+    clearTimeout(timeout);
+    if(data && (data.ok===true)){
+      dot.classList.add('ok');
+      statusText.textContent = '✅ Conectado al catálogo';
+      statusDetail.textContent = 'Listo para responder consultas.';
+    } else {
+      dot.classList.add('bad');
+      statusText.textContent = '⚠️ Respuesta inválida del catálogo';
+      statusDetail.textContent = 'Revisa el endpoint / permisos.';
+    }
+    delete window[cb]; s.remove();
+  };
+  s.onerror = function(){
+    clearTimeout(timeout);
+    dot.classList.add('bad');
+    statusText.textContent = '❌ No conectado al catálogo';
+    statusDetail.textContent = 'CSP o error de red al cargar el script JSONP.';
+    delete window[cb]; s.remove();
+  };
+  s.src = url;
+  document.head.appendChild(s);
+})();
 </script>
 </body>
 </html>
