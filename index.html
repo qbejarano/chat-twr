@@ -1,0 +1,183 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Consultas de Stock & Precios</title>
+  <style>
+    :root { --bg:#0f172a; --card:#111827; --accent:#22d3ee; --muted:#94a3b8; --text:#e5e7eb; }
+    body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,"Helvetica Neue",Arial; background:linear-gradient(180deg,#0b1220,#0f172a 50%); color:var(--text);} 
+    .wrap{max-width:880px;margin:0 auto;padding:24px;}
+    .card{background:linear-gradient(180deg,#0b1326,#0c1a2f); border:1px solid #1f2937; border-radius:16px; padding:16px; box-shadow:0 10px 30px rgba(0,0,0,.35);} 
+    header{display:flex;align-items:center;gap:12px;margin-bottom:12px}
+    .logo{width:36px;height:36px;display:grid;place-items:center;border-radius:10px;background:radial-gradient(circle at 30% 30%,#22d3ee,transparent 60%),radial-gradient(circle at 70% 70%,#a78bfa,transparent 60%);}
+    h1{font-size:1.2rem;margin:0}
+    .hint{color:var(--muted);font-size:.9rem}
+    .chat{display:flex;flex-direction:column;gap:12px; height:60vh; min-height:420px; overflow:auto; padding:8px; background:rgba(255,255,255,0.02); border:1px solid #1e293b; border-radius:12px;}
+    .msg{max-width:85%; padding:10px 12px; border-radius:14px; line-height:1.35; box-shadow:0 6px 20px rgba(0,0,0,.25)}
+    .u{align-self:flex-end; background:linear-gradient(180deg,#0ea5e9,#0284c7); color:white}
+    .b{align-self:flex-start; background:#0b1326; border:1px solid #1f2a44}
+    .time{display:block; font-size:.75rem; color:#93a3b6; margin-top:6px}
+    .inputbar{display:flex;gap:10px;margin-top:12px}
+    .inputbar input{flex:1; padding:12px 14px; border-radius:12px; border:1px solid #1f2937; background:#0b1326; color:var(--text)}
+    .inputbar button{padding:12px 16px; border-radius:12px; border:0; font-weight:600; cursor:pointer; background:linear-gradient(180deg,#22d3ee,#0ea5e9); color:#0b1326}
+    .inputbar button:disabled{opacity:.6;cursor:not-allowed}
+    .item{padding:10px 12px; border:1px dashed #26354d; border-radius:10px; margin-top:8px}
+    .small{font-size:.9rem;color:var(--muted)}
+    .loader{width:22px;height:22px;border-radius:50%;border:3px solid rgba(255,255,255,.18);border-top-color:#22d3ee;animation:spin 1s linear infinite;display:inline-block;vertical-align:middle}
+    @keyframes spin{to{transform:rotate(360deg)}}
+    .row{display:flex;gap:8px;flex-wrap:wrap}
+    .pill{font-size:.8rem;border:1px solid #2a3a56;color:#cbd5e1;padding:4px 8px;border-radius:999px}
+    .footer{margin-top:8px;color:#64748b;font-size:.8rem}
+    .link{color:#22d3ee}
+    .cta{display:inline-flex;gap:8px;align-items:center;margin-top:10px}
+    .ghost{background:#0b1326;border:1px solid #1f2a44;color:#cbd5e1}
+    .stack{display:flex;flex-direction:column;gap:6px}
+    .modal{position:fixed;inset:0;background:rgba(2,6,23,.65);display:none;align-items:center;justify-content:center;padding:16px}
+    .modal > div{background:#0b1326;border:1px solid #1f2a44;border-radius:14px;padding:16px;max-width:460px;width:100%}
+    .modal label{font-size:.9rem;color:#9fb0c6}
+    .modal input{width:100%;padding:10px 12px;border-radius:10px;border:1px solid #21324a;background:#0b1326;color:#e5e7eb}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="card">
+      <header>
+        <div class="logo">💬</div>
+        <div>
+          <h1>Consulta de Materiales & Equipos</h1>
+          <div class="hint">Pregunta por <b>SKU</b> o <b>nombre</b>. Ej: <i>ONT-GPON-X</i> o <i>router gpon huawei</i></div>
+        </div>
+      </header>
+
+      <div id="chat" class="chat" aria-live="polite"></div>
+
+      <div class="inputbar">
+        <input id="q" placeholder="Escribe tu consulta…" autocomplete="off" />
+        <button id="send">Enviar</button>
+      </div>
+
+      <div class="footer">Powered by Google Sheets · Funciona en móvil y PC · Si no está en catálogo, registramos tu solicitud y te contactamos</div>
+    </div>
+  </div>
+
+  <div id="modal" class="modal" role="dialog" aria-modal="true">
+    <div>
+      <h3>Déjanos tu contacto</h3>
+      <p class="small">No encontramos ese material ahora. Déjanos tus datos y te escribimos con la mejor opción.</p>
+      <div class="stack" style="margin-top:8px">
+        <label>Nombre</label>
+        <input id="m_nombre" />
+        <label>WhatsApp / Teléfono</label>
+        <input id="m_tel" />
+      </div>
+      <div class="row" style="margin-top:12px">
+        <button id="m_enviar">Enviar solicitud</button>
+        <button id="m_cerrar" class="ghost">Cancelar</button>
+      </div>
+    </div>
+  </div>
+
+<script>
+// 1) CONFIGURA TU URL del Apps Script del catálogo (termina en /exec)
+const CATALOG_URL = 'https://script.google.com/macros/s/AKfycbyAfnoJHlkg1z8fBCDLkOnhvibA3O4BjbEmPwnNJwnDqc2zrt40Z8Ju1P1hAaWg1p1L/exec'; // <-- CAMBIA ESTO por tu URL real
+
+// 2) Utilidades de UI
+const chat = document.getElementById('chat');
+const input = document.getElementById('q');
+const sendBtn = document.getElementById('send');
+const modal = document.getElementById('modal');
+const mNombre = document.getElementById('m_nombre');
+const mTel = document.getElementById('m_tel');
+const mEnviar = document.getElementById('m_enviar');
+const mCerrar = document.getElementById('m_cerrar');
+
+function now(){ return new Date().toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}); }
+function el(tag, cls, html){ const d=document.createElement(tag); if(cls) d.className=cls; if(html!==undefined) d.innerHTML=html; return d; }
+
+function pushBot(html){
+  const b = el('div','msg b'); b.innerHTML = html + `<span class="time">${now()}</span>`; chat.appendChild(b); chat.scrollTop = chat.scrollHeight; }
+function pushUser(text){
+  const u = el('div','msg u'); u.textContent = text; const t=el('span','time',now()); u.appendChild(t); chat.appendChild(u); chat.scrollTop=chat.scrollHeight; }
+
+function loading(){ const d=el('div','msg b'); d.innerHTML = `<span class="loader"></span> Buscando en catálogo…`; d.id='loading'; chat.appendChild(d); chat.scrollTop=chat.scrollHeight; }
+function stopLoading(){ const d=document.getElementById('loading'); if(d) d.remove(); }
+
+// 3) Mensaje de bienvenida
+pushBot(`¡Hola! 👋 Puedo ayudarte a consultar <b>precios y stock</b>.<div class="row" style="margin-top:8px"><span class="pill">Ej: ONT-GPON-X</span><span class="pill">Router GPON Huawei</span><span class="pill">SFP 1G LX</span></div>`);
+
+// 4) Lógica principal
+async function queryCatalog(q){
+  if(!q) return;
+  pushUser(q);
+  input.value=''; input.focus();
+  loading();
+  try{
+    const url = `${CATALOG_URL}/search?q=${encodeURIComponent(q)}`;
+    const res = await fetch(url);
+    const data = await res.json();
+    stopLoading();
+    if(!data.ok) throw new Error(data.error||'Error de API');
+
+    if((data.results||[]).length){
+      let html = '<b>Encontré estas opciones:</b>';
+      data.results.forEach(r => {
+        const precio = (typeof r.precio === 'number') ? `$${r.precio}` : (r.precio||'—');
+        const stock = (r.stock!==undefined && r.stock!=='') ? r.stock : '—';
+        html += `<div class="item">
+          <div><b>${r.nombre||'(sin nombre)'}</b></div>
+          <div class="small">SKU: ${r.sku||'—'} · Hoja: ${r.hoja||'—'}</div>
+          <div class="row" style="margin-top:6px"><span class="pill">Precio: ${precio}</span><span class="pill">Stock: ${stock}</span></div>
+        </div>`;
+      });
+      html += `<div class="small" style="margin-top:8px">¿Quieres que reserve alguno o te cotice envío? Escríbeme el <b>SKU</b> y la <b>cantidad</b>.</div>`;
+      pushBot(html);
+    } else {
+      // No hay resultados → pedir datos y registrar solicitud
+      sessionStorage.setItem('last_q', q);
+      mNombre.value = localStorage.getItem('nombre')||'';
+      mTel.value = localStorage.getItem('tel')||'';
+      modal.style.display='flex';
+    }
+  }catch(err){
+    stopLoading();
+    pushBot(`⚠️ Ocurrió un error consultando el catálogo.<br><span class="small">${err.message}</span>`);
+  }
+}
+
+sendBtn.addEventListener('click', ()=> queryCatalog(input.value.trim()));
+input.addEventListener('keydown', e=>{ if(e.key==='Enter') queryCatalog(input.value.trim()); });
+
+// 5) Registrar solicitud cuando no hay resultados
+mCerrar.onclick = ()=> modal.style.display='none';
+mEnviar.onclick = async ()=>{
+  const nombre = mNombre.value.trim();
+  const tel = mTel.value.trim();
+  const q = sessionStorage.getItem('last_q')||'';
+  if(!q){ modal.style.display='none'; return; }
+  if(!nombre || !tel){ alert('Por favor completa nombre y teléfono'); return; }
+  localStorage.setItem('nombre', nombre);
+  localStorage.setItem('tel', tel);
+
+  // Enviar al endpoint /request de tu Apps Script
+  try{
+    mEnviar.disabled=true; mEnviar.textContent='Enviando…';
+    const res = await fetch(`${CATALOG_URL}/request`, {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ q, from: `${nombre} (${tel})`, ch:'web' })
+    });
+    const data = await res.json().catch(()=>({}));
+    modal.style.display='none'; mEnviar.disabled=false; mEnviar.textContent='Enviar solicitud';
+    if(data && data.ok){
+      pushBot('🙏 Gracias. Registré tu solicitud y te contactaremos con la mejor opción.');
+    } else {
+      pushBot('He intentado registrar tu solicitud, pero hubo un problema. Igual te contactaremos pronto.');
+    }
+  }catch(err){
+    modal.style.display='none'; mEnviar.disabled=false; mEnviar.textContent='Enviar solicitud';
+    pushBot('No pude registrar tu solicitud por ahora. Intentaré nuevamente más tarde.');
+  }
+};
+</script>
+</body>
+</html>
