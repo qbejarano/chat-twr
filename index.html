@@ -46,7 +46,7 @@
         <div class="logo">💬</div>
         <div>
           <h1>Consulta de Materiales & Equipos</h1>
-          <div class="hint">Pregunta por <b>SKU</b> o <b>nombre</b>. Ej: <i>ONT-GPON-X</i> o <i>router gpon huawei</i></div>
+          <div class="hint">Pregunta por <b>SKU</b> o <b>nombre</b>. Ej: <i>ONT-GPON-X</i> o <i>fibra</i></div>
         </div>
       </header>
 
@@ -57,7 +57,7 @@
         <button id="send">Enviar</button>
       </div>
 
-      <div class="footer">Powered by Google Sheets · Funciona en móvil y PC · Si no está en catálogo, registramos tu solicitud y te contactamos</div>
+      <div class="footer">Funciona en móvil y PC · Si no está en catálogo, registramos tu solicitud y te contactamos</div>
     </div>
   </div>
 
@@ -79,8 +79,8 @@
   </div>
 
 <script>
-// 1) CONFIGURA TU URL del Apps Script del catálogo (termina en /exec)
-const CATALOG_URL = 'https://script.google.com/macros/s/AKfycbyAfnoJHlkg1z8fBCDLkOnhvibA3O4BjbEmPwnNJwnDqc2zrt40Z8Ju1P1hAaWg1p1L/exec'; // <-- CAMBIA ESTO por tu URL real
+// 1) TU URL del Apps Script del catálogo (termina en /exec)
+const CATALOG_URL = ''https://script.google.com/macros/s/AKfycbyAfnoJHlkg1z8fBCDLkOnhvibA3O4BjbEmPwnNJwnDqc2zrt40Z8Ju1P1hAaWg1p1L/exec';
 
 // 2) Utilidades de UI
 const chat = document.getElementById('chat');
@@ -104,44 +104,59 @@ function loading(){ const d=el('div','msg b'); d.innerHTML = `<span class="loade
 function stopLoading(){ const d=document.getElementById('loading'); if(d) d.remove(); }
 
 // 3) Mensaje de bienvenida
-pushBot(`¡Hola! 👋 Puedo ayudarte a consultar <b>precios y stock</b>.<div class="row" style="margin-top:8px"><span class="pill">Ej: ONT-GPON-X</span><span class="pill">Router GPON Huawei</span><span class="pill">SFP 1G LX</span></div>`);
+pushBot(`¡Hola! 👋 Puedo ayudarte a consultar <b>precios y stock</b>.<div class="row" style="margin-top:8px"><span class="pill">Ej: ONT-GPON-X</span><span class="pill">Fibra</span><span class="pill">SFP 1G LX</span></div>`);
 
-// 4) Lógica principal
+// 4) Búsqueda con JSONP (evita CORS)
 async function queryCatalog(q){
   if(!q) return;
   pushUser(q);
   input.value=''; input.focus();
   loading();
-  try{
-    const url = `${CATALOG_URL}/search?q=${encodeURIComponent(q)}`;
-    const res = await fetch(url);
-    const data = await res.json();
-    stopLoading();
-    if(!data.ok) throw new Error(data.error||'Error de API');
 
-    if((data.results||[]).length){
-      let html = '<b>Encontré estas opciones:</b>';
-      data.results.forEach(r => {
-        const precio = (typeof r.precio === 'number') ? `$${r.precio}` : (r.precio||'—');
-        const stock = (r.stock!==undefined && r.stock!=='') ? r.stock : '—';
-        html += `<div class="item">
-          <div><b>${r.nombre||'(sin nombre)'}</b></div>
-          <div class="small">SKU: ${r.sku||'—'} · Hoja: ${r.hoja||'—'}</div>
-          <div class="row" style="margin-top:6px"><span class="pill">Precio: ${precio}</span><span class="pill">Stock: ${stock}</span></div>
-        </div>`;
-      });
-      html += `<div class="small" style="margin-top:8px">¿Quieres que reserve alguno o te cotice envío? Escríbeme el <b>SKU</b> y la <b>cantidad</b>.</div>`;
-      pushBot(html);
-    } else {
-      // No hay resultados → pedir datos y registrar solicitud
-      sessionStorage.setItem('last_q', q);
-      mNombre.value = localStorage.getItem('nombre')||'';
-      mTel.value = localStorage.getItem('tel')||'';
-      modal.style.display='flex';
-    }
-  }catch(err){
+  try{
+    const cb = `cb_${Date.now()}`;
+    window[cb] = function(data){
+      stopLoading();
+      renderResultsOrAsk(data, q);
+      delete window[cb];
+      s.remove();
+    };
+    const s = document.createElement('script');
+    s.src = `${CATALOG_URL}/search?q=${encodeURIComponent(q)}&callback=${cb}`;
+    s.onerror = function(){
+      stopLoading();
+      pushBot('⚠️ No pude consultar el catálogo (JSONP). Intenta más tarde.');
+      delete window[cb];
+      s.remove();
+    };
+    document.head.appendChild(s);
+  } catch(err){
     stopLoading();
     pushBot(`⚠️ Ocurrió un error consultando el catálogo.<br><span class="small">${err.message}</span>`);
+  }
+}
+
+function renderResultsOrAsk(data, q){
+  if(data && data.ok && (data.results||[]).length){
+    let html = '<b>Encontré estas opciones:</b>';
+    data.results.forEach(r => {
+      const precio = (typeof r.precio === 'number') ? `$${r.precio}` : (r.precio||'—');
+      const stock = (r.stock!==undefined && r.stock!=='') ? r.stock : '—';
+      html += `<div class="item">
+        <div><b>${r.nombre||'(sin nombre)'}</b></div>
+        <div class="small">SKU: ${r.sku||'—'} · Hoja: ${r.hoja||'—'}</div>
+        <div class="row" style="margin-top:6px">
+          <span class="pill">Precio: ${precio}</span><span class="pill">Stock: ${stock}</span>
+        </div>
+      </div>`;
+    });
+    html += `<div class="small" style="margin-top:8px">¿Quieres que reserve alguno o te cotice envío? Escríbeme el <b>SKU</b> y la <b>cantidad</b>.</div>`;
+    pushBot(html);
+  } else {
+    sessionStorage.setItem('last_q', q);
+    mNombre.value = localStorage.getItem('nombre')||'';
+    mTel.value = localStorage.getItem('tel')||'';
+    modal.style.display='flex';
   }
 }
 
@@ -159,7 +174,7 @@ mEnviar.onclick = async ()=>{
   localStorage.setItem('nombre', nombre);
   localStorage.setItem('tel', tel);
 
-  // Enviar al endpoint /request de tu Apps Script
+  // Primero intentamos POST normal (puede fallar por CORS según hosting)
   try{
     mEnviar.disabled=true; mEnviar.textContent='Enviando…';
     const res = await fetch(`${CATALOG_URL}/request`, {
@@ -170,10 +185,31 @@ mEnviar.onclick = async ()=>{
     modal.style.display='none'; mEnviar.disabled=false; mEnviar.textContent='Enviar solicitud';
     if(data && data.ok){
       pushBot('🙏 Gracias. Registré tu solicitud y te contactaremos con la mejor opción.');
-    } else {
-      pushBot('He intentado registrar tu solicitud, pero hubo un problema. Igual te contactaremos pronto.');
+      return;
     }
-  }catch(err){
+  }catch(e){ /* caeremos a JSONP */ }
+
+  // Fallback JSONP (requiere que tu Apps Script acepte GET /request con callback)
+  try{
+    const cb = `cb_req_${Date.now()}`;
+    window[cb] = function(resp){
+      modal.style.display='none'; mEnviar.disabled=false; mEnviar.textContent='Enviar solicitud';
+      if(resp && resp.ok){
+        pushBot('🙏 Gracias. Registré tu solicitud y te contactaremos con la mejor opción.');
+      } else {
+        pushBot('He intentado registrar tu solicitud, pero hubo un problema. Igual te contactaremos pronto.');
+      }
+      delete window[cb]; s.remove();
+    };
+    const s = document.createElement('script');
+    s.src = `${CATALOG_URL}/request?q=${encodeURIComponent(q)}&from=${encodeURIComponent(nombre+' ('+tel+')')}&ch=web&callback=${cb}`;
+    s.onerror = function(){
+      modal.style.display='none'; mEnviar.disabled=false; mEnviar.textContent='Enviar solicitud';
+      pushBot('No pude registrar tu solicitud por ahora. Intentaré nuevamente más tarde.');
+      delete window[cb]; s.remove();
+    };
+    document.head.appendChild(s);
+  } catch(err){
     modal.style.display='none'; mEnviar.disabled=false; mEnviar.textContent='Enviar solicitud';
     pushBot('No pude registrar tu solicitud por ahora. Intentaré nuevamente más tarde.');
   }
